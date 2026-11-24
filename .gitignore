@@ -1,0 +1,18 @@
+# Secrets
+.env
+
+# Data / hasil scan
+*.db
+*_scan.json
+footprint_report.json
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Editor
+*.code-workspace
+.vscode/

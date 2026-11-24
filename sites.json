@@ -1,0 +1,33 @@
+{
+  "_doc": "Tiap situs: url ({u} = username), check.type = status | present | absent | redirect | json_nonempty. Situs 'manual' memblokir pengecekan otomatis; tool hanya memberi link untuk dicek sendiri.",
+  "sites": [
+    {"name": "YouTube",     "category": "Sosial Media",   "url": "https://www.youtube.com/@{u}",              "check": {"type": "status"}},
+    {"name": "X (Twitter)", "category": "Sosial Media",   "url": "https://x.com/{u}",                         "check": {"type": "status"}},
+    {"name": "Telegram",    "category": "Sosial Media",   "url": "https://t.me/{u}",                          "check": {"type": "present", "marker": "tgme_page_title"}},
+    {"name": "Pinterest",   "category": "Sosial Media",   "url": "https://www.pinterest.com/{u}/",            "check": {"type": "absent",  "marker": "User not found"}},
+    {"name": "Linktree",    "category": "Sosial Media",   "url": "https://linktr.ee/{u}",                     "check": {"type": "status"}},
+    {"name": "Kompasiana",  "category": "Lokal Indonesia","url": "https://www.kompasiana.com/{u}",            "check": {"type": "status"}},
+    {"name": "Vidio",       "category": "Lokal Indonesia","url": "https://www.vidio.com/@{u}",                "check": {"type": "status"}},
+    {"name": "KaryaKarsa",  "category": "Lokal Indonesia","url": "https://karyakarsa.com/{u}",                "check": {"type": "redirect", "marker": "karyakarsa.com/404"}},
+    {"name": "Tokopedia",   "category": "Lokal Indonesia","url": "https://www.tokopedia.com/{u}",             "check": {"type": "status"}},
+    {"name": "Wattpad",     "category": "Hiburan",        "url": "https://www.wattpad.com/api/v3/users/{u}",  "profile": "https://www.wattpad.com/user/{u}", "check": {"type": "status"}},
+    {"name": "SoundCloud",  "category": "Hiburan",        "url": "https://soundcloud.com/{u}",                "check": {"type": "status"}},
+    {"name": "Roblox",      "category": "Game",           "url": "https://www.roblox.com/user.aspx?username={u}", "check": {"type": "redirect", "marker": "request-error"}},
+    {"name": "Steam",       "category": "Game",           "url": "https://steamcommunity.com/id/{u}",         "check": {"type": "absent",  "marker": "The specified profile could not be found"}},
+    {"name": "Chess.com",   "category": "Game",           "url": "https://api.chess.com/pub/player/{u}",      "profile": "https://www.chess.com/member/{u}", "check": {"type": "status"}},
+    {"name": "GitHub",      "category": "Developer",      "url": "https://api.github.com/users/{u}",          "profile": "https://github.com/{u}", "check": {"type": "status"}},
+    {"name": "GitLab",      "category": "Developer",      "url": "https://gitlab.com/api/v4/users?username={u}", "profile": "https://gitlab.com/{u}", "check": {"type": "json_nonempty"}},
+    {"name": "Docker Hub",  "category": "Developer",      "url": "https://hub.docker.com/v2/users/{u}/",      "profile": "https://hub.docker.com/u/{u}", "check": {"type": "status"}},
+    {"name": "Dribbble",    "category": "Kreatif",        "url": "https://dribbble.com/{u}",                  "check": {"type": "status"}},
+
+    {"name": "Instagram",   "category": "Sosial Media",   "url": "https://www.instagram.com/{u}/",  "check": {"type": "manual"}},
+    {"name": "TikTok",      "category": "Sosial Media",   "url": "https://www.tiktok.com/@{u}",     "check": {"type": "manual"}},
+    {"name": "Facebook",    "category": "Sosial Media",   "url": "https://www.facebook.com/{u}",    "check": {"type": "manual"}},
+    {"name": "Threads",     "category": "Sosial Media",   "url": "https://www.threads.net/@{u}",    "check": {"type": "manual"}},
+    {"name": "Shopee",      "category": "Lokal Indonesia","url": "https://shopee.co.id/{u}",        "check": {"type": "manual"}},
+    {"name": "Kaskus",      "category": "Lokal Indonesia","url": "https://www.kaskus.co.id/@{u}",   "check": {"type": "manual"}},
+    {"name": "Saweria",     "category": "Lokal Indonesia","url": "https://saweria.co/{u}",          "check": {"type": "manual"}},
+    {"name": "Trakteer",    "category": "Lokal Indonesia","url": "https://trakteer.id/{u}",         "check": {"type": "manual"}},
+    {"name": "PyPI",        "category": "Developer",      "url": "https://pypi.org/user/{u}/",      "check": {"type": "manual"}}
+  ]
+}

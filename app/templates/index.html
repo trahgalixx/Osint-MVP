@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · OSINT Recon{% endblock %}
+
+{% block head %}
+<style>
+  form.scan { display: flex; gap: 10px; flex-wrap: wrap; }
+  form.scan input[type=text] { flex: 1 1 260px; font-family: var(--mono); }
+  .modules { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; font-size: 12px; color: var(--muted); }
+  .modules span.mod { border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
+  .hist-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .hist-head h2 { margin: 0; }
+  .hint { font-size: 12px; color: var(--muted); }
+  .consent { display: flex; gap: 8px; align-items: flex-start; margin-top: 10px; font-size: 13px;
+    color: var(--muted); cursor: pointer; }
+  .consent[hidden] { display: none; }
+  .consent input { margin-top: 3px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>Dashboard</h1>
+<p class="sub">Mulai pemindaian OSINT pasif terhadap domain atau IP target.</p>
+
+<section class="card">
+  <h2>New Scan</h2>
+  <form class="scan" id="scanForm" autocomplete="off">
+    <input type="text" id="target" name="target" placeholder="example.com" required aria-label="Target">
+    <select id="targetType" aria-label="Target type">
+      <optgroup label="Infrastruktur">
+        <option value="DOMAIN_NAME">Domain</option>
+        <option value="IP_ADDRESS">IPv4 Address</option>
+      </optgroup>
+      <optgroup label="Audit Jejak Digital">
+        <option value="USERNAME">Username</option>
+        <option value="EMAIL_ADDRESS">Email</option>
+        <option value="PERSON_NAME">Nama Lengkap</option>
+      </optgroup>
+      <optgroup label="Recon Organisasi">
+        <option value="ORGANIZATION">Domain Organisasi</option>
+      </optgroup>
+    </select>
+    <button type="submit" class="primary" id="startBtn">Start Scan</button>
+  </form>
+  <label class="consent" id="consentBox" hidden>
+    <input type="checkbox" id="authorized">
+    <span id="consentText"></span>
+  </label>
+  <div class="error" id="formError"></div>
+  <div class="modules">
+    Modul aktif:
+    {% for m in modules %}
+      <span class="mod" title="{{ m.description }} — watches: {{ m.watched_events|join(', ') }}">{{ m.name }}</span>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="card">
+  <div class="hist-head">
+    <h2>Scan History</h2>
+    <span class="hint" id="refreshHint"></span>
+  </div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>Target</th><th>Type</th><th>Status</th>
+          <th>Results</th><th>Started</th><th>Duration</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="scanRows">
+        <tr><td colspan="8" class="empty">Memuat…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const rowsEl = document.getElementById("scanRows");
+  const hintEl = document.getElementById("refreshHint");
+  const form = document.getElementById("scanForm");
+  const errEl = document.getElementById("formError");
+  const btn = document.getElementById("startBtn");
+  let pollTimer = null;
+
+  const typeSel = document.getElementById("targetType");
+  const targetIn = document.getElementById("target");
+  const consentBox = document.getElementById("consentBox");
+  const consentCb = document.getElementById("authorized");
+  const TYPE_UI = {
+    DOMAIN_NAME:   { ph: "example.com" },
+    IP_ADDRESS:    { ph: "8.8.8.8" },
+    USERNAME:      { ph: "username_anda", consent: "self" },
+    EMAIL_ADDRESS: { ph: "anda@email.com", consent: "self" },
+    PERSON_NAME:   { ph: "Nama Lengkap Anda", consent: "self" },
+    ORGANIZATION:  { ph: "perusahaan.co.id", consent: "org" },
+  };
+  const CONSENT_TEXT = {
+    self: "Saya menyatakan data ini milik saya sendiri (audit jejak digital pribadi), atau saya punya izin dari pemiliknya.",
+    org:  "Saya menyatakan memiliki otorisasi tertulis dari organisasi ini untuk melakukan recon (mis. kontrak pentest / tim internal).",
+  };
+  function syncTypeUI() {
+    const ui = TYPE_UI[typeSel.value];
+    targetIn.placeholder = ui.ph;
+    consentBox.hidden = !ui.consent;
+    consentCb.checked = false;
+    if (ui.consent) document.getElementById("consentText").textContent = CONSENT_TEXT[ui.consent];
+  }
+  typeSel.addEventListener("change", syncTypeUI);
+
+  function renderScans(scans) {
+    rowsEl.replaceChildren();
+    if (!scans.length) {
+      rowsEl.append(el("tr", {}, el("td", { colspan: 8, class: "empty" }, "Belum ada pemindaian.")));
+      return;
+    }
+    for (const s of scans) {
+      const del = (s.status === "RUNNING" || s.status === "PENDING") ? "" :
+        el("button", { class: "link", title: "Hapus scan", onclick: () => deleteScan(s.id, s.target) }, "Hapus");
+      rowsEl.append(el("tr", {},
+        el("td", { class: "num" }, `#${s.id}`),
+        el("td", { class: "mono" }, el("a", { href: `/scan/${s.id}` }, s.target)),
+        el("td", {}, typePill(s.target_type)),
+        el("td", {}, badge(s.status)),
+        el("td", { class: "num" }, String(s.result_count ?? 0)),
+        el("td", {}, fmtDate(s.created_at)),
+        el("td", { class: "num" }, duration(s.created_at, s.completed_at)),
+        el("td", {}, del),
+      ));
+    }
+  }
+
+  async function loadScans() {
+    clearTimeout(pollTimer);
+    try {
+      const scans = await api("/api/scans");
+      renderScans(scans);
+      const active = scans.some(s => s.status === "RUNNING" || s.status === "PENDING");
+      hintEl.textContent = active ? "Auto-refresh setiap 3 detik" : "";
+      pollTimer = setTimeout(loadScans, active ? 3000 : 15000);
+    } catch (e) {
+      hintEl.textContent = `Gagal memuat: ${e.message}`;
+      pollTimer = setTimeout(loadScans, 5000);
+    }
+  }
+
+  async function deleteScan(id, target) {
+    if (!confirm(`Hapus scan #${id} (${target}) beserta semua hasilnya?`)) return;
+    try { await api(`/api/scans/${id}`, { method: "DELETE" }); }
+    catch (e) { alert(e.message); }
+    loadScans();
+  }
+
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    errEl.textContent = "";
+    btn.disabled = true;
+    btn.textContent = "Starting…";
+    try {
+      const res = await api("/api/scans", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target: document.getElementById("target").value,
+          target_type: typeSel.value,
+          authorized: consentCb.checked,
+        }),
+      });
+      const keepType = typeSel.value;
+      form.reset();
+      typeSel.value = keepType;
+      syncTypeUI();
+      await loadScans();
+      // Uncomment to jump straight to the result page:
+      // location.href = `/scan/${res.scan_id}`;
+    } catch (e) {
+      errEl.textContent = e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "Start Scan";
+    }
+  });
+
+  loadScans();
+</script>
+{% endblock %}

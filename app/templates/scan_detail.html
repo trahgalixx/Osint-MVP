@@ -1,0 +1,421 @@
+{% extends "base.html" %}
+{% block title %}Scan #{{ scan.id }} · {{ scan.target }} · OSINT Recon{% endblock %}
+
+{% block head %}
+<script src="https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
+<style>
+  .crumb { font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  .title-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .title-row h1 { font-family: var(--mono); margin: 0; word-break: break-all; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px; margin: 16px 0 20px; }
+  .stat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 10px 14px; }
+  .stat .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .stat .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+  .tabs button { background: none; border: none; border-bottom: 2px solid transparent;
+    border-radius: 0; padding: 10px 14px; color: var(--muted); font-weight: 600; }
+  .tabs button[aria-selected=true] { color: var(--text); border-bottom-color: var(--accent); }
+  .tabpanel[hidden] { display: none; }
+
+  .filters { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .filters input[type=search] { flex: 1 1 220px; }
+  .filters .count { margin-left: auto; color: var(--muted); font-size: 13px; }
+  th .arrow { opacity: .6; font-size: 10px; margin-left: 4px; }
+  tr.flash { animation: flash 1.6s ease-out; }
+  @keyframes flash { from { background: color-mix(in srgb, var(--accent) 35%, transparent); } }
+  td .actions { display: flex; gap: 10px; font-size: 12px; white-space: nowrap; }
+
+  .graph-layout { display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
+  @media (max-width: 900px) { .graph-layout { grid-template-columns: 1fr; } }
+  #graph { height: 640px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); }
+  @media (max-width: 600px) { #graph { height: 460px; } }
+  .graph-toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
+  .graph-toolbar .count { margin-left: auto; color: var(--muted); font-size: 13px; }
+  .side .card { margin-bottom: 16px; }
+  .legend { display: flex; flex-direction: column; gap: 6px; }
+  .legend label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; }
+  .legend .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  .legend .n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+  dl.detail { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 13px; }
+  dl.detail dt { color: var(--muted); }
+  dl.detail dd { margin: 0; word-break: break-all; }
+  .chain { margin: 10px 0 0; padding-left: 18px; font-size: 12px; font-family: var(--mono); }
+  .chain li { margin-bottom: 3px; word-break: break-all; }
+  .muted { color: var(--muted); font-size: 13px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="crumb"><a href="/">Dashboard</a> / Scan #{{ scan.id }}</div>
+<div class="title-row">
+  <h1>{{ scan.target }}</h1>
+  <span id="statusBadge" class="badge {{ scan.status }}">{{ scan.status }}</span>
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="k">Target type</div><div class="v" id="stType">{{ scan.target_type }}</div></div>
+  <div class="stat"><div class="k">Findings</div><div class="v" id="stCount">—</div></div>
+  <div class="stat"><div class="k">Event types</div><div class="v" id="stTypes">—</div></div>
+  <div class="stat"><div class="k">Started</div><div class="v" id="stStart" style="font-size:14px">—</div></div>
+  <div class="stat"><div class="k">Duration</div><div class="v" id="stDur">—</div></div>
+</div>
+
+<div class="tabs" role="tablist">
+  <button role="tab" id="tab-table" aria-controls="panel-table" aria-selected="true">Data Table</button>
+  <button role="tab" id="tab-graph" aria-controls="panel-graph" aria-selected="false">Node Graph</button>
+</div>
+
+<!-- TAB 1: Data table -->
+<section class="tabpanel" id="panel-table" role="tabpanel" aria-labelledby="tab-table">
+  <div class="card">
+    <div class="filters">
+      <select id="fType" aria-label="Filter event type"><option value="">Semua event_type</option></select>
+      <select id="fModule" aria-label="Filter module"><option value="">Semua module</option></select>
+      <input type="search" id="fSearch" placeholder="Cari data…" aria-label="Search">
+      <button id="fReset" type="button">Reset</button>
+      <span class="count" id="tableCount"></span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th class="sortable" data-key="id">ID</th>
+            <th class="sortable" data-key="event_type">Event Type</th>
+            <th class="sortable" data-key="data">Data</th>
+            <th class="sortable" data-key="module">Module</th>
+            <th class="sortable" data-key="source_event_id">Source</th>
+            <th class="sortable" data-key="timestamp">Time</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="resultRows"><tr><td colspan="7" class="empty">Memuat…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- TAB 2: Node graph -->
+<section class="tabpanel" id="panel-graph" role="tabpanel" aria-labelledby="tab-graph" hidden>
+  <div class="graph-toolbar">
+    <select id="layoutSel" aria-label="Layout">
+      <option value="force">Layout: Force-directed</option>
+      <option value="tree">Layout: Hierarki (kiri → kanan)</option>
+    </select>
+    <button type="button" id="fitBtn">Fit</button>
+    <button type="button" id="physBtn">Freeze</button>
+    <span class="count" id="graphCount"></span>
+  </div>
+  <div class="graph-layout">
+    <div id="graph"></div>
+    <aside class="side">
+      <div class="card">
+        <h2>Legend</h2>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="card">
+        <h2>Node</h2>
+        <div id="nodeDetail" class="muted">Klik node untuk melihat detail &amp; rantai asal-usulnya.</div>
+      </div>
+    </aside>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const SCAN_ID = {{ scan.id }};
+  const state = {
+    scan: {{ scan | tojson }},
+    results: [],
+    byId: new Map(),
+    sort: { key: "id", dir: 1 },
+    hiddenTypes: new Set(),
+  };
+
+  /* ---------------------------------------------------------------- Tabs */
+  const tabs = { table: document.getElementById("tab-table"), graph: document.getElementById("tab-graph") };
+  function showTab(name) {
+    for (const [k, btn] of Object.entries(tabs)) {
+      const on = k === name;
+      btn.setAttribute("aria-selected", on);
+      document.getElementById(`panel-${k}`).hidden = !on;
+    }
+    if (name === "graph") ensureGraph();
+    history.replaceState(null, "", `#${name}`);
+  }
+  tabs.table.onclick = () => showTab("table");
+  tabs.graph.onclick = () => showTab("graph");
+
+  /* ---------------------------------------------------------------- Header */
+  function renderHeader() {
+    const s = state.scan;
+    const b = document.getElementById("statusBadge");
+    b.className = `badge ${s.status}`; b.textContent = s.status;
+    document.getElementById("stCount").textContent = state.results.length;
+    document.getElementById("stTypes").textContent = new Set(state.results.map(r => r.event_type)).size;
+    document.getElementById("stStart").textContent = fmtDate(s.created_at);
+    document.getElementById("stDur").textContent = duration(s.created_at, s.completed_at);
+  }
+
+  /* ---------------------------------------------------------------- Table */
+  const fType = document.getElementById("fType");
+  const fModule = document.getElementById("fModule");
+  const fSearch = document.getElementById("fSearch");
+  const rowsEl = document.getElementById("resultRows");
+
+  function syncSelect(sel, values) {
+    const cur = sel.value;
+    const existing = new Set([...sel.options].map(o => o.value));
+    for (const v of [...values].sort()) if (!existing.has(v)) sel.append(el("option", { value: v }, v));
+    sel.value = cur;
+  }
+
+  function renderTable() {
+    syncSelect(fType, new Set(state.results.map(r => r.event_type)));
+    syncSelect(fModule, new Set(state.results.map(r => r.module)));
+
+    const t = fType.value, m = fModule.value, q = fSearch.value.trim().toLowerCase();
+    const { key, dir } = state.sort;
+    const rows = state.results
+      .filter(r => (!t || r.event_type === t) && (!m || r.module === m) &&
+                   (!q || r.data.toLowerCase().includes(q)))
+      .sort((a, b) => {
+        const x = a[key] ?? "", y = b[key] ?? "";
+        return (typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y))) * dir;
+      });
+
+    document.querySelectorAll("th.sortable").forEach(th => {
+      th.querySelector(".arrow")?.remove();
+      if (th.dataset.key === key) th.append(el("span", { class: "arrow" }, dir > 0 ? "▲" : "▼"));
+    });
+    document.getElementById("tableCount").textContent = `${rows.length} dari ${state.results.length} temuan`;
+
+    rowsEl.replaceChildren();
+    if (!rows.length) {
+      rowsEl.append(el("tr", {}, el("td", { colspan: 7, class: "empty" },
+        state.results.length ? "Tidak ada hasil yang cocok dengan filter." :
+        (state.scan.status === "COMPLETED" || state.scan.status === "FAILED" ? "Scan tidak menghasilkan temuan." : "Menunggu temuan…"))));
+      return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const r of rows) {
+      const parent = r.source_event_id != null ? state.byId.get(r.source_event_id) : null;
+      const srcCell = parent
+        ? el("a", { href: "#", title: parent.data, onclick: (e) => { e.preventDefault(); jumpToRow(parent.id); } },
+             `#${parent.id} ${parent.event_type}`)
+        : el("span", { class: "muted" }, "root");
+      frag.append(el("tr", { id: `row-${r.id}` },
+        el("td", { class: "num" }, `#${r.id}`),
+        el("td", {}, typePill(r.event_type)),
+        el("td", { class: "mono" }, r.data),
+        el("td", {}, r.module),
+        el("td", {}, srcCell),
+        el("td", { class: "num", style: "white-space:nowrap" }, new Date(r.timestamp).toLocaleTimeString()),
+        el("td", {}, el("div", { class: "actions" },
+          el("a", { href: "#", onclick: (e) => { e.preventDefault(); focusNode(r.id); } }, "Graph"),
+          el("a", { href: "#", onclick: (e) => { e.preventDefault(); fType.value = r.event_type; renderTable(); } }, "Filter tipe"),
+        )),
+      ));
+    }
+    rowsEl.append(frag);
+  }
+
+  function jumpToRow(id) {
+    let row = document.getElementById(`row-${id}`);
+    if (!row) { fType.value = ""; fModule.value = ""; fSearch.value = ""; renderTable(); row = document.getElementById(`row-${id}`); }
+    if (!row) return;
+    row.scrollIntoView({ behavior: "smooth", block: "center" });
+    row.classList.remove("flash"); void row.offsetWidth; row.classList.add("flash");
+  }
+
+  document.querySelectorAll("th.sortable").forEach(th => th.addEventListener("click", () => {
+    const k = th.dataset.key;
+    state.sort = { key: k, dir: state.sort.key === k ? -state.sort.dir : 1 };
+    renderTable();
+  }));
+  fType.onchange = fModule.onchange = renderTable;
+  fSearch.oninput = renderTable;
+  document.getElementById("fReset").onclick = () => { fType.value = fModule.value = fSearch.value = ""; renderTable(); };
+
+  /* ---------------------------------------------------------------- Graph */
+  let network = null, nodesDS = null, edgesDS = null, physicsOn = true;
+  const graphEl = document.getElementById("graph");
+  const cssVar = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+  function depthOf(r) {
+    let d = 0, cur = r;
+    while (cur && cur.source_event_id != null && d < 50) { cur = state.byId.get(cur.source_event_id); d++; }
+    return d;
+  }
+
+  function toVisNode(r) {
+    const root = r.source_event_id == null;
+    const color = typeColor(r.event_type);
+    const label = r.data.length > 42 ? r.data.slice(0, 40) + "…" : r.data;
+    return {
+      id: r.id,
+      label,
+      title: `${r.event_type}\n${r.data}\nmodule: ${r.module}`,
+      group: r.event_type,
+      level: depthOf(r),
+      shape: root ? "star" : "dot",
+      size: root ? 28 : (r.event_type === "SUBDOMAIN" || r.event_type === "IP_ADDRESS" ? 12 : 9),
+      color: { background: color, border: color, highlight: { background: "#ffffff", border: color },
+               hover: { background: color, border: "#ffffff" } },
+      font: { color: cssVar("--text"), size: root ? 16 : 12, face: "system-ui",
+              strokeWidth: 3, strokeColor: cssVar("--bg") },
+      hidden: state.hiddenTypes.has(r.event_type),
+    };
+  }
+
+  function layoutOptions(mode) {
+    return mode === "tree"
+      ? { layout: { hierarchical: { enabled: true, direction: "LR", sortMethod: "directed",
+                                     levelSeparation: 220, nodeSpacing: 26, shakeTowards: "roots" } },
+          physics: { enabled: physicsOn, hierarchicalRepulsion: { nodeDistance: 90 }, solver: "hierarchicalRepulsion" } }
+      : { layout: { hierarchical: { enabled: false }, improvedLayout: state.results.length < 150 },
+          physics: { enabled: physicsOn, solver: "forceAtlas2Based",
+                     forceAtlas2Based: { gravitationalConstant: -60, springLength: 90, avoidOverlap: 0.4 },
+                     stabilization: { iterations: 300 } } };
+  }
+
+  function ensureGraph() {
+    if (network) { network.redraw(); return; }
+    if (typeof vis === "undefined") {
+      graphEl.replaceChildren(el("div", { class: "empty" }, "Gagal memuat vis-network dari CDN. Periksa koneksi internet."));
+      return;
+    }
+    nodesDS = new vis.DataSet(state.results.map(toVisNode));
+    edgesDS = new vis.DataSet(state.results.filter(r => r.source_event_id != null && state.byId.has(r.source_event_id))
+      .map(toVisEdge));
+    network = new vis.Network(graphEl, { nodes: nodesDS, edges: edgesDS }, {
+      interaction: { hover: true, tooltipDelay: 120, navigationButtons: false, keyboard: false },
+      edges: { arrows: { to: { enabled: true, scaleFactor: 0.5 } }, color: { color: cssVar("--border"), highlight: cssVar("--accent"), hover: cssVar("--muted") },
+               smooth: { type: "continuous" }, width: 1.2 },
+      ...layoutOptions(document.getElementById("layoutSel").value),
+    });
+    network.on("click", (p) => showNodeDetail(p.nodes[0]));
+    network.once("stabilizationIterationsDone", () => network.fit({ animation: false }));
+    renderLegend();
+    updateGraphCount();
+  }
+
+  function toVisEdge(r) {
+    return { id: `${r.source_event_id}-${r.id}`, from: r.source_event_id, to: r.id };
+  }
+
+  function syncGraph(newRows) {
+    if (!network || !newRows.length) return;
+    nodesDS.update(newRows.map(toVisNode));
+    edgesDS.update(newRows.filter(r => r.source_event_id != null && state.byId.has(r.source_event_id)).map(toVisEdge));
+    renderLegend();
+    updateGraphCount();
+  }
+
+  function updateGraphCount() {
+    const visible = nodesDS ? nodesDS.get({ filter: n => !n.hidden }).length : 0;
+    document.getElementById("graphCount").textContent = `${visible} node · ${edgesDS ? edgesDS.length : 0} relasi`;
+  }
+
+  function renderLegend() {
+    const counts = {};
+    for (const r of state.results) counts[r.event_type] = (counts[r.event_type] || 0) + 1;
+    const box = document.getElementById("legend");
+    box.replaceChildren();
+    for (const t of Object.keys(counts).sort()) {
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = !state.hiddenTypes.has(t);
+      cb.onchange = () => {
+        cb.checked ? state.hiddenTypes.delete(t) : state.hiddenTypes.add(t);
+        nodesDS.update(state.results.filter(r => r.event_type === t).map(r => ({ id: r.id, hidden: !cb.checked })));
+        updateGraphCount();
+      };
+      box.append(el("label", {}, cb, el("span", { class: "dot", style: `background:${typeColor(t)}` }), t,
+        el("span", { class: "n" }, String(counts[t]))));
+    }
+    if (!box.children.length) box.append(el("span", { class: "muted" }, "Belum ada node."));
+  }
+
+  function showNodeDetail(id) {
+    const box = document.getElementById("nodeDetail");
+    const r = id != null ? state.byId.get(id) : null;
+    if (!r) { box.className = "muted"; box.textContent = "Klik node untuk melihat detail & rantai asal-usulnya."; return; }
+    box.className = "";
+    const chain = [];
+    for (let cur = r; cur; cur = cur.source_event_id != null ? state.byId.get(cur.source_event_id) : null) {
+      chain.unshift(cur); if (chain.length > 50) break;
+    }
+    const children = state.results.filter(x => x.source_event_id === r.id).length;
+    box.replaceChildren(
+      el("dl", { class: "detail" },
+        el("dt", {}, "ID"), el("dd", {}, `#${r.id}`),
+        el("dt", {}, "Type"), el("dd", {}, typePill(r.event_type)),
+        el("dt", {}, "Data"), el("dd", { class: "mono" }, r.data),
+        el("dt", {}, "Module"), el("dd", {}, r.module),
+        el("dt", {}, "Children"), el("dd", {}, String(children)),
+      ),
+      el("div", { class: "muted", style: "margin-top:12px" }, "Rantai asal-usul:"),
+      el("ol", { class: "chain" }, ...chain.map(c => el("li", {},
+        el("a", { href: "#", onclick: (e) => { e.preventDefault(); focusNode(c.id); } }, `${c.event_type}: ${c.data}`)))),
+      el("div", { style: "margin-top:10px" },
+        el("a", { href: "#", onclick: (e) => { e.preventDefault(); showTab("table"); jumpToRow(r.id); } }, "Lihat di tabel →")),
+    );
+  }
+
+  function focusNode(id) {
+    showTab("graph");
+    if (!network) return;
+    const r = state.byId.get(id);
+    if (r && state.hiddenTypes.has(r.event_type)) {
+      state.hiddenTypes.delete(r.event_type);
+      nodesDS.update(state.results.filter(x => x.event_type === r.event_type).map(x => ({ id: x.id, hidden: false })));
+      renderLegend(); updateGraphCount();
+    }
+    network.selectNodes([id]);
+    network.focus(id, { scale: 1.3, animation: { duration: 500 } });
+    showNodeDetail(id);
+  }
+
+  document.getElementById("layoutSel").onchange = (e) => {
+    if (!network) return;
+    network.setOptions(layoutOptions(e.target.value));
+    nodesDS.update(state.results.map(r => ({ id: r.id, level: depthOf(r) })));
+    setTimeout(() => network.fit({ animation: { duration: 400 } }), 600);
+  };
+  document.getElementById("fitBtn").onclick = () => network?.fit({ animation: { duration: 400 } });
+  document.getElementById("physBtn").onclick = (e) => {
+    physicsOn = !physicsOn;
+    e.target.textContent = physicsOn ? "Freeze" : "Unfreeze";
+    network?.setOptions({ physics: { enabled: physicsOn } });
+  };
+
+  /* ---------------------------------------------------------------- Polling */
+  let pollTimer = null;
+  async function refresh() {
+    clearTimeout(pollTimer);
+    try {
+      const [scan, results] = await Promise.all([
+        api(`/api/scans/${SCAN_ID}`),
+        api(`/api/scans/${SCAN_ID}/results`),
+      ]);
+      state.scan = scan;
+      const fresh = results.filter(r => !state.byId.has(r.id));
+      for (const r of fresh) state.byId.set(r.id, r);
+      state.results = results;
+      renderHeader();
+      if (fresh.length || !rowsEl.dataset.loaded) { renderTable(); rowsEl.dataset.loaded = "1"; }
+      syncGraph(fresh);
+      if (scan.status === "RUNNING" || scan.status === "PENDING") pollTimer = setTimeout(refresh, 3000);
+    } catch (e) {
+      document.getElementById("tableCount").textContent = `Gagal memuat: ${e.message}`;
+      pollTimer = setTimeout(refresh, 5000);
+    }
+  }
+
+  refresh().then(() => { if (location.hash === "#graph") showTab("graph"); });
+</script>
+{% endblock %}
